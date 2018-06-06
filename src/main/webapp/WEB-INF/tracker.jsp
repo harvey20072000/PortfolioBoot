@@ -166,8 +166,9 @@
 			/*----------------list size------------------*/
 			function maxPages() {
 				console.log('maxPages 執行!');
+				var targetUrl = './track/maxPages?userName='+userName;
 				$.ajax({
-					url : './track/maxPages',
+					url : targetUrl,
 					type : 'GET',
 					dataType : 'json',
 					error : function(xhr, textStatus, errorThrown) {
@@ -536,7 +537,7 @@
 			}
 			
 			function submitGet(){
-				var targetUrl = './track/get?stockId='+$('#input0').val();
+				var targetUrl = './track/get?stockId='+$('#input0').val()+'&userName='+userName;
 				$.ajax({
 					url : targetUrl,
 					type : 'GET',
@@ -1270,7 +1271,7 @@
 
 	<body >
 		<div style="margin:20px;">
-			<a href="./analyzer.jsp" target="_blank">前往分析網頁</a><br>
+			<a href="./analyzer" target="_blank">前往分析網頁</a><br>
 			<div id="userInfo" style="display:inline;"></div> <div id = "msg" style="margin-left: 20px;display:inline;"></div><br>
 			<div style="margin-top:3px;">
 				<label style="display: inline; font-size:37px;">允許彈出通知 </label>

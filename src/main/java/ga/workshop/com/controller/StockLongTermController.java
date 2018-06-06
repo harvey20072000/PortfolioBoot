@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
-import ga.workshop.com.crud.FlowOfCRUD;
+import ga.workshop.com.crud.TargetCRUD;
 import ga.workshop.com.model.Target;
 import ga.workshop.com.model.TargetWrapper;
 import lombok.extern.slf4j.Slf4j;
@@ -24,14 +24,15 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Controller
 @RequestMapping("/lts")
+@SuppressWarnings({"rawtypes","unchecked"})
 public class StockLongTermController {
 	
 	private Gson gson = new Gson();
 	
 	@Autowired
-	private FlowOfCRUD crud/* = new TargetCRUD()*/;
+	private TargetCRUD crud;
 	
-    @ResponseBody
+	@ResponseBody
 	@RequestMapping(value = "create", method={RequestMethod.POST, RequestMethod.GET})
 	public String createTarget(@RequestParam String stockId) {
     	log.debug("createTarget[stockId:{}]",stockId);
@@ -39,7 +40,7 @@ public class StockLongTermController {
 		result.put("stockId", stockId);
 		try {
 			result.put("status", "0000");
-			result.put("isOK", crud.process("target", "create", stockId));
+			result.put("isOK", crud.createTarget(stockId));
 		} catch (Exception e) {
 			log.error("createTarget fail, exception => {}", e.toString());
 			result.put("status", "9999");
@@ -58,7 +59,7 @@ public class StockLongTermController {
 		result.put("stockId", stockId);
 		try {
 			result.put("status", "0000");
-			result.put("target", new TargetWrapper((Target)crud.process("target", "get", stockId)));
+			result.put("target", new TargetWrapper((Target)crud.getTarget(stockId)));
 		} catch (Exception e) {
 			log.error("getTarget fail, exception => {}", e.toString());
 			result.put("status", "9999");
@@ -73,7 +74,7 @@ public class StockLongTermController {
 		Map result = new HashMap();
 		try {
 			result.put("status", "0000");
-			result.put("targets", crud.process("target", "maxPages", null));
+			result.put("targets", crud.maxPages());
 		} catch (Exception e) {
 			log.error("maxPages fail, exception => {}", e.toString());
 			result.put("status", "9999");
@@ -92,7 +93,7 @@ public class StockLongTermController {
 		try {
 			List<TargetWrapper> wrappers = new LinkedList<>();
 //			List<Target> targets = (List<Target>)crud.process("target", "list", page + "");
-			for(Target target : (List<Target>)crud.process("target", "list", page + "")){
+			for(Target target : (List<Target>)crud.listAll(page)){
 				wrappers.add(new TargetWrapper(target));
 			}
 			result.put("status", "0000");
@@ -112,7 +113,7 @@ public class StockLongTermController {
 		result.put("stockId", stockId);
 		try {
 			result.put("status", "0000");
-			result.put("isOK", crud.process("target", "update", stockId));
+			result.put("isOK", crud.updateTarget(stockId));
 		} catch (Exception e) {
 			log.error("updateTarget fail, exception => {}", e.toString());
 			result.put("status", "9999");
@@ -128,7 +129,7 @@ public class StockLongTermController {
 		result.put("stockId", stockId);
 		try {
 			result.put("status", "0000");
-			result.put("isOK", crud.process("target", "delete", stockId));
+			result.put("isOK", crud.deleteTarget(stockId));
 		} catch (Exception e) {
 			log.error("deleteTarget fail, exception => {}", e.toString());
 			result.put("status", "9999");
@@ -142,7 +143,7 @@ public class StockLongTermController {
 		Map result = new HashMap();
 		try {
 			result.put("status", "0000");
-			result.put("isOK", crud.process("target", "output", null));
+			result.put("isOK", crud.outputDatas());
 		} catch (Exception e) {
 			log.error("outputDatas fail, exception => {}", e.toString());
 			result.put("status", "9999");

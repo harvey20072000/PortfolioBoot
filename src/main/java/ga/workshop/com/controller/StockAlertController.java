@@ -16,19 +16,19 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
-import ga.workshop.com.crud.FlowOfCRUD;
-import ga.workshop.com.util.PortfolioContext;
+import ga.workshop.com.crud.TargetAlertCRUD;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Controller
 @RequestMapping("/alert")
+@SuppressWarnings({"rawtypes","unchecked"})
 public class StockAlertController {
 	
 	private Gson gson = new Gson();
 	
 	@Autowired
-	private FlowOfCRUD crud/* = new TargetCRUD()*/;
+	private TargetAlertCRUD crud;
 	
     @ResponseBody
 	@RequestMapping(value = "add", method={RequestMethod.POST, RequestMethod.GET})
@@ -52,11 +52,10 @@ public class StockAlertController {
 				}
 			}
 			
-			setUser(userName);
 			result.put("status", "0000");
 			result.put("userName", userName);
 			result.put("stockId", stockId);
-			result.put("isOK", crud.process("alert", "add", restArgs));
+			result.put("isOK", crud.addTarget(userName, stockId, restArgs));
 		} catch (Exception e) {
 			log.error("addAlert fail, exception => {}", e.toString());
 			result.put("status", "9999");
@@ -66,7 +65,7 @@ public class StockAlertController {
     
     @ResponseBody
 	@RequestMapping(value = "get", method={RequestMethod.POST, RequestMethod.GET})
-    public String getAlert(@RequestParam String id){	
+    public String getAlert(@RequestParam String userName,@RequestParam String id){	
     	log.debug("getAlert[id:{}]",id);
 		Map result = new HashMap();
 		GsonBuilder gsonBuilder = new GsonBuilder();
@@ -75,7 +74,7 @@ public class StockAlertController {
 		result.put("id", id);
 		try {
 			result.put("status", "0000");
-			result.put("target", crud.process("alert", "get", id));
+			result.put("target", crud.getTarget(userName, id));
 		} catch (Exception e) {
 			log.error("getAlert fail, exception => {}", e.toString());
 			result.put("status", "9999");
@@ -92,13 +91,8 @@ public class StockAlertController {
 		gsonBuilder.serializeNulls();
 		gsonBuilder.serializeSpecialFloatingPointValues();
 		try {
-//			List<TrackedTarget> wrappers = crud.process("track", "list", page+"");
-//			for(Target target : crud.listAll(page)){
-//				wrappers.add(new TargetWrapper(target));
-//			}
-			setUser(userName);
 			result.put("status", "0000");
-			result.put("targets", crud.process("alert", "list", null));
+			result.put("targets", crud.listAll(userName));
 		} catch (Exception e) {
 			log.error("listAlert fail, exception => {}", e.toString());
 			result.put("status", "9999");
@@ -115,9 +109,8 @@ public class StockAlertController {
 		gsonBuilder.serializeNulls();
 		gsonBuilder.serializeSpecialFloatingPointValues();
 		try {
-			setUser(userName);
 			result.put("status", "0000");
-			result.put("targets", crud.process("alert", "listTriggered", null));
+			result.put("targets", crud.listAllTriggered(userName));
 		} catch (Exception e) {
 			log.error("listAlert fail, exception => {}", e.toString());
 			result.put("status", "9999");
@@ -147,9 +140,8 @@ public class StockAlertController {
 			
 			log.debug("updateAlert[id:{}]",id);
 			result.put("id", id);
-			setUser(userName);
 			result.put("status", "0000");
-			result.put("isOK", crud.process("alert", "update", restArgs));
+			result.put("isOK", crud.updateTarget(userName, id, restArgs));
 		} catch (Exception e) {
 			log.error("updateAlert fail, exception => {}", e.toString());
 			result.put("status", "9999");
@@ -164,9 +156,8 @@ public class StockAlertController {
 		Map result = new HashMap();
 		result.put("id", id);
 		try {
-			setUser(userName);
 			result.put("status", "0000");
-			result.put("isOK", crud.process("alert", "remove", id));
+			result.put("isOK", crud.removeTarget(userName, id));
 		} catch (Exception e) {
 			log.error("removeAlert fail, exception => {}", e.toString());
 			result.put("status", "9999");
@@ -179,18 +170,13 @@ public class StockAlertController {
     public String outputDatas(@RequestParam String userName) {
 		Map result = new HashMap();
 		try {
-			setUser(userName);
 			result.put("status", "0000");
-			result.put("isOK", crud.process("alert", "output", null));
+			result.put("isOK", crud.outputDatas(userName));
 		} catch (Exception e) {
 			log.error("outputDatas fail, exception => {}", e.toString());
 			result.put("status", "9999");
 		}
     	return gson.toJson(result);
 	}
-    
-    private void setUser(String userName){
-    	PortfolioContext.userName = userName;
-    }
 
 }

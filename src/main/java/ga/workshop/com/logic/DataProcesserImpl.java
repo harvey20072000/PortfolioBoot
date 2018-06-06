@@ -29,7 +29,7 @@ public class DataProcesserImpl implements DataProcesser {
 	private final String GOODINFO_URL = "https://www.cmoney.tw/finance/technicalanalysis.aspx?s={STOCK_ID}";
 	
 	@Override
-	public Target processData(Target target ,String jsonStr) throws Exception{
+	public boolean processData(Target target ,String jsonStr) throws Exception{
 		JsonObject jsonObject, tempObject, tempObject2;
 		String label,temp;
 		
@@ -74,7 +74,7 @@ public class DataProcesserImpl implements DataProcesser {
 		target.setUrl(GOODINFO_URL.replace("{STOCK_ID}", target.getStockId()));
 
 		target.setUpdateTime(new Date());
-		return target;
+		return true;
 	}
 	
 	private Target inputJsonValue(JsonObject jsonObject,Target target){

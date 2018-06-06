@@ -18,10 +18,13 @@ import tw.com.geosat.util.WebUtil;
 public class Test2 {
 
 	public static void main(String[] args) throws Exception{
-		String s = URLEncoder.encode("中興保全");
-		System.out.println(s);
-		System.out.println(s.replaceAll("%", ""));
-		System.out.println(s.replaceAll("%", "").toLowerCase());
+//		String s = URLEncoder.encode("中興保全");
+//		System.out.println(s);
+//		System.out.println(s.replaceAll("%", ""));
+//		System.out.println(s.replaceAll("%", "").toLowerCase());
+		System.out.println("root".matches("[a-z,A-Z,0-9]+"));
+		System.out.println("1234".matches("[a-z,A-Z,0-9]+"));
+		System.out.println("root1234".matches("[a-z,A-Z,0-9]+"));
 	}
 	
 }

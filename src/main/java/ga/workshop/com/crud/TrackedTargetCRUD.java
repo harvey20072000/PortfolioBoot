@@ -3,12 +3,12 @@ package ga.workshop.com.crud;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
@@ -21,15 +21,16 @@ import org.springframework.stereotype.Service;
 import com.google.gson.JsonParser;
 
 import ga.workshop.com.dao.TargetDAO;
+import ga.workshop.com.logic.AuthService;
 import ga.workshop.com.logic.DataProcesser;
 import ga.workshop.com.logic.TWStockService;
 import ga.workshop.com.logic.YahooFinanceService;
 import ga.workshop.com.model.Target;
 import ga.workshop.com.model.TrackedTarget;
 import ga.workshop.com.model.User;
+import ga.workshop.com.model.UserAssets;
 import ga.workshop.com.model.UserDataChangeRecord;
 import ga.workshop.com.util.Const;
-import ga.workshop.com.util.PortfolioContext;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -49,7 +50,7 @@ public class TrackedTargetCRUD {
 	private DataProcesser dataProcesser;
 	
 	@Autowired
-	private FlowOfCRUD flowOfCRUD;
+	private TargetCRUD targetCRUD;
 	
 	@Autowired
 	private TargetAlertCRUD targetAlertCRUD;
@@ -60,38 +61,29 @@ public class TrackedTargetCRUD {
 	@Autowired
 	private YahooFinanceService yahooFinanceService;
 	
-//	private Map<String ,Target> rawDataInputMap = new ConcurrentHashMap<>();
-	private Map<String ,User> users = new ConcurrentHashMap<>();
-	private Map<String, UserDataChangeRecord> changeRecords = new ConcurrentHashMap<>();
+	@Autowired
+	private AuthService authService;
 	
-//	private volatile int cacheDataUpdatedCounts;	// 要和dataUpdatedCounts做比對，有不一樣就自動儲存
-//	private volatile int dataUpdatedCounts;
+	private Map<String ,UserAssets> usersAssets = new ConcurrentHashMap<>();
+	private Map<String, UserDataChangeRecord> changeRecords = new ConcurrentHashMap<>();
 	
 	private Map<String, Checker> runningThreads = new ConcurrentHashMap<>();	// key是userName
 	private Map<String, Integer> cacheDataUpdatedCountsMapForThreads = new ConcurrentHashMap<>();
 	private Map<String, Integer> cacheTrackedSizeCountsMapForThreads = new ConcurrentHashMap<>();
-//	private volatile int cacheDataUpdatedCountsForThreads;
 	
-//	private List<Target> retList = new ArrayList<>();
 	private int maxDataSend = 4;
 	
 	private ScheduledThreadPoolExecutor stpe = new ScheduledThreadPoolExecutor(10);
-	private static ScheduledFuture f;
 	
-	private Long mapUpdateTime;
-//	private Map<String, Long> cacheUpdateTime = new HashMap<>();
-	private long cacheInterval = 5*60*1000;
+	private final long CACHE_INTERVAL = 1*60*1000; // 1分鐘
 	
 	private JsonParser parser = new JsonParser();
 	
 	
-	public TrackedTargetCRUD(){
-		
-	}
+	public TrackedTargetCRUD(){}
 	
 	@PostConstruct
 	private void init() {
-		log.debug("path value : {}",Const.DATA_INPUT_FILE_PATH);
 		new Thread() {
 			@Override
 			public void run() {
@@ -105,14 +97,24 @@ public class TrackedTargetCRUD {
 	
 	private void initCache() {
 		int count = 1;
+		Map<String, UserAssets> tempUserAssetsMap = new HashMap<>();
 		while(true){
 			try {
 				if(count == 1){
-					users = targetDAO.inputUsersWithDatas(Const.USERS_OUTPUT_FILE_PATH, users);
-				}else if (count == 2) {
-					users = targetDAO.inputUsers(Const.USERS_INPUT_FILE_PATH, users);
+					tempUserAssetsMap = targetDAO.inputUsersAssets(Const.USERS_ASSETS_FILE_PATH, tempUserAssetsMap);
+				}else if (count >= 2) {
+					synchronized (authService.getUsersMap()) {
+						while(authService.getUsersMap() == null || authService.getUsersMap().size() == 0) {
+							log.debug("inputUsersAssets waiting......");
+							authService.getUsersMap().wait();
+						}
+					}
+					for(User user : authService.getUsersMap().values()) {
+						tempUserAssetsMap.put(user.getName(), new UserAssets(user.getName()));
+					}
 				}
-				if(users.size() != 0 || count >= 10){
+				if(tempUserAssetsMap.size() != 0 || count >= 10){
+					log.debug("inputUsersAssets success !!");
 					break;
 				}
 			} catch (Exception e) {
@@ -120,65 +122,36 @@ public class TrackedTargetCRUD {
 			}
 			count++;
 		}
-		for (String name : users.keySet())
+		usersAssets.putAll(tempUserAssetsMap);
+		for (String name : usersAssets.keySet())
 			changeRecords.put(name, new UserDataChangeRecord(name));
-	}
-	
-	// 每個處理方法都要用此方法決定目前是哪個user的list
-	private User loadCurrentUser(){
-		if(users.containsKey(PortfolioContext.userName))
-			return users.get(PortfolioContext.userName);
-		log.error("loadCurrentUser fail => {}",PortfolioContext.userName);
-		return null;
 	}
 	
 	/*
 	 * 
 	 */
-	public String outputDatas(){
-//		try {
-//			Map<String, Target> tempCacheMap = new HashMap<>();
-//			tempCacheMap = targetDAO.inputData(dataInputFilePath, tempCacheMap);
-//			if (rawDataInputMap.size() != tempCacheMap.size() || !hasSameContents(rawDataInputMap, tempCacheMap)){
-//				rawDataInputMap.clear();
-//				rawDataInputMap.putAll(tempCacheMap);
-//				users.clear();
-//				users.putAll(rawDataInputMap);
-//				runningThreads.clear();
-//			}
-//		} catch (Exception e1) {
-//			log.error("outputDatas checking is-input-file-changed fail, exception => {}", e1.toString());
-//		}
-		User user = loadCurrentUser();
-		UserDataChangeRecord record = changeRecords.get(loadCurrentUser().getName());
-		UserDataChangeRecord record2 = targetAlertCRUD.getChangeRecords().get(user.getName());
-		record.setCacheDataUpdatedCounts(record.getCacheDataUpdatedCounts()+record2.getCacheDataUpdatedCounts());
-		record.setDataUpdatedCounts(record.getDataUpdatedCounts()+record2.getDataUpdatedCounts());
-		users.get(user.getName()).setTargetAlerts(targetAlertCRUD.getUsers().get(user.getName()).getTargetAlerts());
-		
-		if(record.getCacheDataUpdatedCounts() == record.getDataUpdatedCounts())
+	public String outputDatas(String userName) {
+		UserDataChangeRecord record = changeRecords.get(userName);
+		UserDataChangeRecord record2 = targetAlertCRUD.getChangeRecords().get(userName);
+		record.setCacheDataUpdatedCounts(record.getCacheDataUpdatedCounts() + record2.getCacheDataUpdatedCounts());
+		record.setDataUpdatedCounts(record.getDataUpdatedCounts() + record2.getDataUpdatedCounts());
+		usersAssets.get(userName).setTargetAlerts(targetAlertCRUD.getUsersAssets().get(userName).getTargetAlerts());
+
+		if (record.getCacheDataUpdatedCounts() == record.getDataUpdatedCounts())
 			return "unchange";
-		if(record.getCacheDataUpdatedCounts() < record.getDataUpdatedCounts()){
+		if (record.getCacheDataUpdatedCounts() < record.getDataUpdatedCounts()) {
 			log.error("outputDatas fail, logic error");
 			record.setDataUpdatedCounts(record.getCacheDataUpdatedCounts());
 			return "logic error";
 		}
 		try {
 			record.setDataUpdatedCounts(record.getCacheDataUpdatedCounts());
-			targetDAO.outputUsers(Const.USERS_OUTPUT_FILE_PATH, users);
+			targetDAO.outputData(Const.USERS_ASSETS_FILE_PATH, usersAssets);
 			return "true";
 		} catch (Exception e) {
-			log.error("outputDatas fail, exception => {}",e.toString());
+			log.error("outputDatas fail, exception => {}", e.toString());
 			return "false";
 		}
-	}
-	
-	private boolean hasSameContents(Map<String, Target> map1,Map<String, Target> map2){
-		for(String key:map1.keySet()){
-			if(!map2.containsKey(key))
-				return false;
-		}
-		return true;
 	}
 	
 	private boolean isValidInput(String... inputs){
@@ -193,17 +166,16 @@ public class TrackedTargetCRUD {
 	/*
 	 * 
 	 */
-	public String addTarget(String stockId){
+	public String addTarget(String userName,String stockId){
 		if (!isValidInput(stockId))
 			return "false";
-		User user = loadCurrentUser();
-		UserDataChangeRecord record = changeRecords.get(user.getName());
+		UserDataChangeRecord record = changeRecords.get(userName);
 		String[] stockIds = stockId.split(",");
 		Target target;
 		String report = null;
 		for(String tempStockId : stockIds){
-			target = flowOfCRUD.getTargetCRUD().getCacheMap().get(tempStockId);
-			user.getTrackedTargets().putIfAbsent(tempStockId, new TrackedTarget(target));
+			target = targetCRUD.getCacheMap().get(tempStockId);
+			usersAssets.get(userName).getTrackedTargets().putIfAbsent(tempStockId, new TrackedTarget(target));
 			record.setCacheDataUpdatedCounts(record.getCacheDataUpdatedCounts()+1);
 			if(report == null){
 				report = tempStockId;
@@ -215,8 +187,8 @@ public class TrackedTargetCRUD {
 		return "true";
 	}
 	
-	private boolean checkCache(String key){
-    	if(loadCurrentUser().getTrackedTargets().get(key) != null)
+	private boolean checkCache(String userName,String key){
+    	if(usersAssets.get(userName).getTrackedTargets().get(key) != null)
     		return true;
     	return false;
     }
@@ -224,28 +196,27 @@ public class TrackedTargetCRUD {
 	/*
 	 * 
 	 */
-	public TrackedTarget getTarget(String stockId) {
-		if (!checkCache(stockId))
+	public TrackedTarget getTarget(String userName,String stockId) {
+		if (!checkCache(userName,stockId))
 			return null;
-		return loadCurrentUser().getTrackedTargets().get(stockId);
+		return usersAssets.get(userName).getTrackedTargets().get(stockId);
 	}
 	
 	/*
 	 * 
 	 */
-	public int maxPages() {
-		return loadCurrentUser().getTrackedTargets().size() % maxDataSend > 0 ? 
-				(loadCurrentUser().getTrackedTargets().size() / maxDataSend + 1) : 
-					(loadCurrentUser().getTrackedTargets().size() / maxDataSend);
+	public int maxPages(String userName) {
+		return usersAssets.get(userName).getTrackedTargets().size() % maxDataSend > 0 ? 
+				(usersAssets.get(userName).getTrackedTargets().size() / maxDataSend + 1) : 
+					(usersAssets.get(userName).getTrackedTargets().size() / maxDataSend);
 	}
 	
 	/*
 	 * 
 	 */
-	public List<TrackedTarget> listAll(int page) {
-		User user = loadCurrentUser();
+	public List<TrackedTarget> listAll(String userName,int page) {
 		List<TrackedTarget> retList = new LinkedList<>();
-		Map<String,TrackedTarget> treeMap = new TreeMap<>(user.getTrackedTargets());
+		Map<String,TrackedTarget> treeMap = new TreeMap<>(usersAssets.get(userName).getTrackedTargets());
 		List<TrackedTarget> trackedTargets = new LinkedList<>(treeMap.values()),primaryTargets = new LinkedList<>();
 		for(int i = 0;i<trackedTargets.size();i++){
 			if(trackedTargets.get(i).getNote() != null && 
@@ -281,13 +252,12 @@ public class TrackedTargetCRUD {
 	/*
 	 * 
 	 */
-	public String updateTarget(String stockId, String... args) {
-		if(!checkCache(stockId) || !isValidInput(stockId))
+	public String updateTarget(String userName,String stockId, String... args) {
+		if(!checkCache(userName,stockId) || !isValidInput(stockId))
 			return "false";
 		String regex = ":";
-		User user = loadCurrentUser();
-		UserDataChangeRecord record = changeRecords.get(user.getName());
-		TrackedTarget trackedTarget = user.getTrackedTargets().get(stockId);
+		UserDataChangeRecord record = changeRecords.get(userName);
+		TrackedTarget trackedTarget = usersAssets.get(userName).getTrackedTargets().get(stockId);
 		for(String arg : args){
 			for(Field field : trackedTarget.getClass().getDeclaredFields()){
 				if(field.getName().toLowerCase().equals(arg.split(regex)[0].toLowerCase())){
@@ -301,7 +271,7 @@ public class TrackedTargetCRUD {
 				}
 			}
 		}
-		user.getTrackedTargets().put(stockId, trackedTarget);
+		usersAssets.get(userName).getTrackedTargets().put(stockId, trackedTarget);
 		record.setCacheDataUpdatedCounts(record.getCacheDataUpdatedCounts()+1);
 		log.debug("Tracked Target( {} ) updated!!", stockId);
 		return "true";
@@ -316,12 +286,11 @@ public class TrackedTargetCRUD {
 	/*
 	 * 
 	 */
-	public String removeTarget(String stockId) {
-		if (!checkCache(stockId))
+	public String removeTarget(String userName,String stockId) {
+		if (!checkCache(userName,stockId))
 			return "false";
-		User user = loadCurrentUser();
-		UserDataChangeRecord record = changeRecords.get(user.getName());
-		user.getTrackedTargets().remove(stockId);
+		UserDataChangeRecord record = changeRecords.get(userName);
+		usersAssets.get(userName).getTrackedTargets().remove(stockId);
 		record.setCacheDataUpdatedCounts(record.getCacheDataUpdatedCounts()+1);
 		log.debug("Tracked Target( {} ) removed!!", stockId);
 		return "true";
@@ -337,44 +306,44 @@ public class TrackedTargetCRUD {
 		UserDataChangeRecord record;
 		
 		if(cacheDataUpdatedCountsMapForThreads.isEmpty()){
-			for(User user : users.values())
-				cacheDataUpdatedCountsMapForThreads.put(user.getName(), new Integer(0));
+			for(UserAssets userAsset : usersAssets.values())
+				cacheDataUpdatedCountsMapForThreads.put(userAsset.getName(), new Integer(0));
 		}
 
-		for(User user : users.values()){
-			record = changeRecords.get(user.getName());
-			threadKey = user.getName();
-			if (user.getTrackedTargets().size() > 0
+		for(UserAssets userAsset : usersAssets.values()){
+			record = changeRecords.get(userAsset.getName());
+			threadKey = userAsset.getName();
+			if (userAsset.getTrackedTargets().size() > 0
 					&& cacheTrackedSizeCountsMapForThreads.size() == 0) {
-				checker = new Checker(user.getName(),user.getTrackedTargets().values());
+				checker = new Checker(userAsset.getName(),userAsset.getTrackedTargets().values());
 				runningThreads.put(threadKey, checker);
-				cacheTrackedSizeCountsMapForThreads.put(threadKey, user.getTrackedTargets().size());
+				cacheTrackedSizeCountsMapForThreads.put(threadKey, userAsset.getTrackedTargets().size());
 				runCheck(checker);
-				System.out.printf("tracker doCheck -> thread：[%s] init executed!%n",user.getName());
+				System.out.printf("tracker doCheck -> thread：[%s] init executed!%n",userAsset.getName());
 			} else if(record.getCacheDataUpdatedCounts() > cacheDataUpdatedCountsMapForThreads.get(threadKey)){
-				if(runningThreads.get(threadKey).getTrackedTargets().size() < user.getTrackedTargets().size()){	// add
-					checker = new Checker(user.getName(),user.getTrackedTargets().values());
+				if(runningThreads.get(threadKey).getTrackedTargets().size() < userAsset.getTrackedTargets().size()){	// add
+					checker = new Checker(userAsset.getName(),userAsset.getTrackedTargets().values());
 					runningThreads.put(threadKey, checker);
 					runCheck(checker);
-					System.out.printf("tracker doCheck -> thread：[%s] add executed!%n",user.getName());
-				}else if(runningThreads.get(threadKey).getTrackedTargets().size() == user.getTrackedTargets().size()){	// update
-					checker = new Checker(user.getName(),user.getTrackedTargets().values());
+					System.out.printf("tracker doCheck -> thread：[%s] add executed!%n",userAsset.getName());
+				}else if(runningThreads.get(threadKey).getTrackedTargets().size() == userAsset.getTrackedTargets().size()){	// update
+					checker = new Checker(userAsset.getName(),userAsset.getTrackedTargets().values());
 					runningThreads.put(threadKey, checker);
 					runCheck(checker);
-					System.out.printf("tracker doCheck -> thread：[%s] update executed!%n",user.getName());
-				}else if (runningThreads.get(threadKey).getTrackedTargets().size() > user.getTrackedTargets().size()) {	// delete
-					checker = new Checker(user.getName(),user.getTrackedTargets().values());
+					System.out.printf("tracker doCheck -> thread：[%s] update executed!%n",userAsset.getName());
+				}else if (runningThreads.get(threadKey).getTrackedTargets().size() > userAsset.getTrackedTargets().size()) {	// delete
+					checker = new Checker(userAsset.getName(),userAsset.getTrackedTargets().values());
 					runningThreads.put(threadKey, checker);
 					runCheck(checker);
-					System.out.printf("tracker doCheck -> thread：[%s] remove executed!%n",user.getName());
+					System.out.printf("tracker doCheck -> thread：[%s] remove executed!%n",userAsset.getName());
 				}
 				cacheDataUpdatedCountsMapForThreads.put(threadKey, record.getCacheDataUpdatedCounts());
 			}else {
-				stpe.execute(new Checker(user.getName(), user.getTrackedTargets().values()));
-				System.out.printf("tracker doCheck -> thread：[%s] auto tracking !%n",user.getName());
+				stpe.execute(new Checker(userAsset.getName(), userAsset.getTrackedTargets().values()));
+				System.out.printf("tracker doCheck -> thread：[%s] auto tracking !%n",userAsset.getName());
 			}
 		}
-		System.out.println("users count : "+users.size());
+		System.out.println("users count : "+usersAssets.size());
 		System.out.println("runningThreads count : "+runningThreads.size());
 		System.out.println("ThreadPool active counts : "+stpe.getActiveCount());
 		System.out.println("ThreadPool size : "+stpe.getPoolSize());
@@ -408,7 +377,7 @@ public class TrackedTargetCRUD {
 		
 		@Override
 		public void run(){
-			System.out.println("Checker running~~~~~~~~");
+			System.out.println("TrackedTargetCRUD Checker running~~~~~~~~");
 			int dataProcessedNum = 0;
 			for (TrackedTarget trackedTarget : trackedTargets) {
 				// yahooFinance
@@ -428,45 +397,6 @@ public class TrackedTargetCRUD {
 	}
 	
 	private TrackedTarget trackStockInfo(TrackedTarget trackedTarget) {
-		/*
-		String stockId = trackedTarget.getStockId();
-		if (checkCache(stockId)) { // 檢查cache，有值則回傳
-//			return stockInfos_cache.get(stockId);
-		}
-
-		Stock yStock = null;
-		try {
-			yStock = YahooFinance.get(stockId + ".TW");
-		} catch (Exception e) {
-			log.error("trackStockInfo fail, stockId({}) not exist => {}", stockId, e.toString());
-			return trackedTarget;
-		}
-
-		StockQuote quote = yStock.getQuote();
-		if(quote == null){
-			log.error("stockId({}) quote is null !",stockId);
-			return trackedTarget;
-		}
-		
-		Date date = new Date();
-		if(date.getDay() == 0 || date.getDay() == 6)	// 若是六日則不紀錄
-			return trackedTarget;
-		if(date.getHours() < 9)	// 九點之前不紀錄
-			return trackedTarget;
-		String dateString = Const.SDF_NO_TIME.format(new Date());
-		Number temp = 0.0;
-		try {
-			temp = quote.getPrice().doubleValue();
-		} catch (Exception e) {
-			log.error("trackStockInfo -> getPrice fail, exception => {}",e.toString());
-		}
-		trackedTarget.getTrackedPrices().put(dateString, temp.doubleValue());
-		
-		temp = quote.getVolume()/1000.0;
-		trackedTarget.getTrackedVolumes().put(dateString, temp.doubleValue());
-		
-		return trackedTarget;
-	*/
 		String serviceName = "";
 		for(int i=0;i<2;i++){
 			try {
@@ -485,33 +415,6 @@ public class TrackedTargetCRUD {
 		return trackedTarget;
 	}
 
-	private Number processFinanceValues(String processType , Number... nums) throws Exception{
-		Double result = 0.0;
-		try {
-			System.out.printf("數值處理方式：%s , 處理個數：%d%n",processType,nums.length);
-			if("sum".equals(processType)){
-				for(Number num : nums){
-					result += num.doubleValue();
-				}
-			}else if("avg".equals(processType)){
-				for(Number num : nums){
-					result += num.doubleValue();
-				}
-				if(nums.length != 0)
-					result /= (nums.length+0d);
-			}
-			return result;
-		} catch (Exception e) {
-			String errMsg;
-			if(nums == null || nums[0] == null){
-				errMsg = "processFinanceValues fail => nums includes null value !";
-			}else {
-				errMsg = "processFinanceValues fail, exception => {}" + e.toString();
-			}
-			throw new Exception(errMsg);
-		}
-	}
-	
 	public static void main(String[] args) throws Exception {
 		TrackedTargetCRUD crud = new TrackedTargetCRUD();
 //		PortfolioContext.userName = "root";

@@ -3,6 +3,7 @@ package ga.workshop.com.crud;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -20,15 +21,16 @@ import org.springframework.stereotype.Service;
 import com.google.gson.JsonParser;
 
 import ga.workshop.com.dao.TargetDAO;
+import ga.workshop.com.logic.AuthService;
 import ga.workshop.com.logic.DataProcesser;
 import ga.workshop.com.logic.TWStockService;
 import ga.workshop.com.logic.YahooFinanceService;
 import ga.workshop.com.model.TargetAlert;
 import ga.workshop.com.model.TrackedTarget;
 import ga.workshop.com.model.User;
+import ga.workshop.com.model.UserAssets;
 import ga.workshop.com.model.UserDataChangeRecord;
 import ga.workshop.com.util.Const;
-import ga.workshop.com.util.PortfolioContext;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -48,15 +50,15 @@ public class TargetAlertCRUD {
 	private DataProcesser dataProcesser;
 	
 	@Autowired
-	private FlowOfCRUD flowOfCRUD;
-	
-	@Autowired
 	private TWStockService twStockService;
 	
 	@Autowired
 	private YahooFinanceService yahooFinanceService;
 	
-	private Map<String ,User> users = new ConcurrentHashMap<>();
+	@Autowired
+	private AuthService authService;
+	
+	private Map<String ,UserAssets> usersAssets = new ConcurrentHashMap<>();
 	private Map<String, UserDataChangeRecord> changeRecords = new ConcurrentHashMap<>();
 	
 	private Map<String, Checker> runningThreads = new ConcurrentHashMap<>();	// key是userName
@@ -88,14 +90,24 @@ public class TargetAlertCRUD {
 	
 	private void initCache() {
 		int count = 1;
+		Map<String, UserAssets> tempUserAssetsMap = new HashMap<>();
 		while(true){
 			try {
 				if(count == 1){
-					users = targetDAO.inputUsersWithDatas(Const.USERS_OUTPUT_FILE_PATH, users);
-				}else if (count == 2) {
-					users = targetDAO.inputUsers(Const.USERS_INPUT_FILE_PATH, users);
+					tempUserAssetsMap = targetDAO.inputUsersAssets(Const.USERS_ASSETS_FILE_PATH, tempUserAssetsMap);
+				}else if (count >= 2) {
+					synchronized (authService.getUsersMap()) {
+						while(authService.getUsersMap() == null || authService.getUsersMap().size() == 0) {
+							log.debug("inputUsersAssets waiting......");
+							authService.getUsersMap().wait();
+						}
+					}
+					for(User user : authService.getUsersMap().values()) {
+						tempUserAssetsMap.put(user.getName(), new UserAssets(user.getName()));
+					}
 				}
-				if(users.size() != 0 || count >= 10){
+				if(tempUserAssetsMap.size() != 0 || count >= 10){
+					log.debug("inputUsersAssets success !!");
 					break;
 				}
 			} catch (Exception e) {
@@ -103,23 +115,16 @@ public class TargetAlertCRUD {
 			}
 			count++;
 		}
-		for (String name : users.keySet())
+		usersAssets.putAll(tempUserAssetsMap);
+		for (String name : usersAssets.keySet())
 			changeRecords.put(name, new UserDataChangeRecord(name));
-	}
-	
-	// 每個處理方法都要用此方法決定目前是哪個user的list
-	private User loadCurrentUser(){
-		if(users.containsKey(PortfolioContext.userName))
-			return users.get(PortfolioContext.userName);
-		log.error("loadCurrentUser fail => {}",PortfolioContext.userName);
-		return null;
 	}
 	
 	/*
 	 * 
 	 */
-	public String outputDatas(){
-		UserDataChangeRecord record = changeRecords.get(loadCurrentUser().getName());
+	public String outputDatas(String userName){
+		UserDataChangeRecord record = changeRecords.get(userName);
 		
 		if(record.getCacheDataUpdatedCounts() == record.getDataUpdatedCounts())
 			return "unchange";
@@ -130,7 +135,7 @@ public class TargetAlertCRUD {
 		}
 		try {
 			record.setDataUpdatedCounts(record.getCacheDataUpdatedCounts());
-			targetDAO.outputUsers(Const.USERS_OUTPUT_FILE_PATH, users);
+			targetDAO.outputData(Const.USERS_ASSETS_FILE_PATH, usersAssets);
 			return "true";
 		} catch (Exception e) {
 			log.error("outputDatas fail, exception => {}",e.toString());
@@ -150,16 +155,15 @@ public class TargetAlertCRUD {
 	/*
 	 * 新增
 	 */
-	public String addTarget(String stockId, String... args) {
+	public String addTarget(String userName,String stockId, String... args) {
 		if (!isValidInput(stockId))
 			return "false";
-		User user = loadCurrentUser();
-		UserDataChangeRecord record = changeRecords.get(user.getName());
+		UserDataChangeRecord record = changeRecords.get(userName);
 		
 		int codeCount = 0;
 		while(true){
 			codeCount++;
-			if(user.getTargetAlerts().containsKey(stockId+"-"+codeCount)){
+			if(usersAssets.get(userName).getTargetAlerts().containsKey(stockId+"-"+codeCount)){
 				continue;
 			}
 			break;
@@ -181,14 +185,14 @@ public class TargetAlertCRUD {
 			}
 		}
 		
-		user.getTargetAlerts().put(alert.getId(), alert);
+		usersAssets.get(userName).getTargetAlerts().put(alert.getId(), alert);
 		record.setCacheDataUpdatedCounts(record.getCacheDataUpdatedCounts()+1);
 		log.debug("Alert for target({}) added!!", stockId);
 		return "true";
 	}
 	
-	private boolean checkCache(String key){
-    	if(loadCurrentUser().getTargetAlerts().get(key) != null)
+	private boolean checkCache(String userName,String key){
+    	if(usersAssets.get(userName).getTargetAlerts().get(key) != null)
     		return true;
     	return false;
     }
@@ -196,27 +200,25 @@ public class TargetAlertCRUD {
 	/*
 	 * 抓取單一
 	 */
-	public TargetAlert getTarget(String alertId) {
-		if (!checkCache(alertId))
+	public TargetAlert getTarget(String userName,String alertId) {
+		if (!checkCache(userName,alertId))
 			return null;
-		return loadCurrentUser().getTargetAlerts().get(alertId);
+		return usersAssets.get(userName).getTargetAlerts().get(alertId);
 	}
 	
 	/*
 	 * 取得全部
 	 */
-	public List<TargetAlert> listAll() {
-		User user = loadCurrentUser();
-		Map<String,TargetAlert> treeMap = new TreeMap<>(user.getTargetAlerts());
+	public List<TargetAlert> listAll(String userName) {
+		Map<String,TargetAlert> treeMap = new TreeMap<>(usersAssets.get(userName).getTargetAlerts());
 		return new LinkedList<>(treeMap.values());
 	}
 	
 	/*
 	 * 取得全部觸發alert
 	 */
-	public List<TargetAlert> listAllTriggered() {
-		User user = loadCurrentUser();
-		Map<String,TargetAlert> treeMap = new TreeMap<>(user.getTargetAlerts());
+	public List<TargetAlert> listAllTriggered(String userName) {
+		Map<String,TargetAlert> treeMap = new TreeMap<>(usersAssets.get(userName).getTargetAlerts());
 		List<TargetAlert> retList = new LinkedList<>();
 		for(TargetAlert alert : treeMap.values()){
 			if(alert.isOn() && alert.isTriggered()){
@@ -229,12 +231,11 @@ public class TargetAlertCRUD {
 	/*
 	 * 修改
 	 */
-	public String updateTarget(String alertId, String... args) {
-		if(!checkCache(alertId) || !isValidInput(alertId))
+	public String updateTarget(String userName,String alertId, String... args) {
+		if(!checkCache(userName,alertId) || !isValidInput(alertId))
 			return "false";
-		User user = loadCurrentUser();
-		UserDataChangeRecord record = changeRecords.get(user.getName());
-		TargetAlert alert = user.getTargetAlerts().get(alertId);
+		UserDataChangeRecord record = changeRecords.get(userName);
+		TargetAlert alert = usersAssets.get(userName).getTargetAlerts().get(alertId);
 		alert.setTriggered(false);
 		
 		String regex = ":";
@@ -255,7 +256,7 @@ public class TargetAlertCRUD {
 				}
 			}
 		}
-		user.getTargetAlerts().put(alertId, alert);
+		usersAssets.get(userName).getTargetAlerts().put(alertId, alert);
 		record.setCacheDataUpdatedCounts(record.getCacheDataUpdatedCounts()+1);
 		log.debug("Alert({}) updated!!", alertId);
 		return "true";
@@ -270,12 +271,11 @@ public class TargetAlertCRUD {
 	/*
 	 * 刪除
 	 */
-	public String removeTarget(String alertId) {
-		if (!checkCache(alertId))
+	public String removeTarget(String userName,String alertId) {
+		if (!checkCache(userName,alertId))
 			return "false";
-		User user = loadCurrentUser();
-		UserDataChangeRecord record = changeRecords.get(user.getName());
-		user.getTargetAlerts().remove(alertId);
+		UserDataChangeRecord record = changeRecords.get(userName);
+		usersAssets.get(userName).getTargetAlerts().remove(alertId);
 		record.setCacheDataUpdatedCounts(record.getCacheDataUpdatedCounts()+1);
 		log.debug("Alert({}) removed!!", alertId);
 		return "true";
@@ -292,44 +292,44 @@ public class TargetAlertCRUD {
 		UserDataChangeRecord record;
 		
 		if(cacheDataUpdatedCountsMapForThreads.isEmpty()){
-			for(User user : users.values())
-				cacheDataUpdatedCountsMapForThreads.put(user.getName(), new Integer(0));
+			for(UserAssets userAsset : usersAssets.values())
+				cacheDataUpdatedCountsMapForThreads.put(userAsset.getName(), new Integer(0));
 		}
 
-		for(User user : users.values()){
-			record = changeRecords.get(user.getName());
-			threadKey = user.getName();
-			if (user.getTargetAlerts().size() > 0
+		for(UserAssets userAsset : usersAssets.values()){
+			record = changeRecords.get(userAsset.getName());
+			threadKey = userAsset.getName();
+			if (userAsset.getTargetAlerts().size() > 0
 					&& cacheTrackedSizeCountsMapForThreads.size() == 0) {
-				checker = new Checker(user.getName(),user.getTargetAlerts().values());
+				checker = new Checker(userAsset.getName(),userAsset.getTargetAlerts().values());
 				runningThreads.put(threadKey, checker);
-				cacheTrackedSizeCountsMapForThreads.put(threadKey, user.getTargetAlerts().size());
+				cacheTrackedSizeCountsMapForThreads.put(threadKey, userAsset.getTargetAlerts().size());
 				runCheck(checker);
-				System.out.printf("alert doCheck -> thread：[%s] init executed!%n",user.getName());
+				System.out.printf("alert doCheck -> thread：[%s] init executed!%n",userAsset.getName());
 			} else if(record.getCacheDataUpdatedCounts() > cacheDataUpdatedCountsMapForThreads.get(threadKey)){
-				if(runningThreads.get(threadKey).getTargetAlerts().size() < user.getTargetAlerts().size()){	// add
-					checker = new Checker(user.getName(),user.getTargetAlerts().values());
+				if(runningThreads.get(threadKey).getTargetAlerts().size() < userAsset.getTargetAlerts().size()){	// add
+					checker = new Checker(userAsset.getName(),userAsset.getTargetAlerts().values());
 					runningThreads.put(threadKey, checker);
 					runCheck(checker);
-					System.out.printf("alert doCheck -> thread：[%s] add executed!%n",user.getName());
-				}else if(runningThreads.get(threadKey).getTargetAlerts().size() == user.getTargetAlerts().size()){	// update
-					checker = new Checker(user.getName(),user.getTargetAlerts().values());
+					System.out.printf("alert doCheck -> thread：[%s] add executed!%n",userAsset.getName());
+				}else if(runningThreads.get(threadKey).getTargetAlerts().size() == userAsset.getTargetAlerts().size()){	// update
+					checker = new Checker(userAsset.getName(),userAsset.getTargetAlerts().values());
 					runningThreads.put(threadKey, checker);
 					runCheck(checker);
-					System.out.printf("alert doCheck -> thread：[%s] update executed!%n",user.getName());
-				}else if (runningThreads.get(threadKey).getTargetAlerts().size() > user.getTargetAlerts().size()) {	// delete
-					checker = new Checker(user.getName(),user.getTargetAlerts().values());
+					System.out.printf("alert doCheck -> thread：[%s] update executed!%n",userAsset.getName());
+				}else if (runningThreads.get(threadKey).getTargetAlerts().size() > userAsset.getTargetAlerts().size()) {	// delete
+					checker = new Checker(userAsset.getName(),userAsset.getTargetAlerts().values());
 					runningThreads.put(threadKey, checker);
 					runCheck(checker);
-					System.out.printf("alert doCheck -> thread：[%s] remove executed!%n",user.getName());
+					System.out.printf("alert doCheck -> thread：[%s] remove executed!%n",userAsset.getName());
 				}
 				cacheDataUpdatedCountsMapForThreads.put(threadKey, record.getCacheDataUpdatedCounts());
 			}else {
-				stpe.execute(new Checker(user.getName(), user.getTargetAlerts().values()));
-				System.out.printf("alert doCheck -> thread：[%s] auto executing !%n",user.getName());
+				stpe.execute(new Checker(userAsset.getName(), userAsset.getTargetAlerts().values()));
+				System.out.printf("alert doCheck -> thread：[%s] auto executing !%n",userAsset.getName());
 			}
 		}
-		System.out.println("users count : "+users.size());
+		System.out.println("users count : "+usersAssets.size());
 		System.out.println("runningThreads count : "+runningThreads.size());
 		System.out.println("ThreadPool active counts : "+stpe.getActiveCount());
 		System.out.println("ThreadPool size : "+stpe.getPoolSize());
@@ -365,7 +365,7 @@ public class TargetAlertCRUD {
 		public void run(){
 			System.out.println("Checker running~~~~~~~~");
 			int dataProcessedNum = 0;
-			User user = users.get(userName);
+			UserAssets userAsset = usersAssets.get(userName);
 			TargetAlert resultAlert;
 			Map<String, List<TargetAlert>> tempAlertsMap = new ConcurrentHashMap<>();
 			for(TargetAlert alert : targetAlerts){
@@ -375,13 +375,13 @@ public class TargetAlertCRUD {
 				tempAlertsMap.get(alert.getStockId()).add(alert);
 			}
 			List<TargetAlert> tempList;
-			for(TrackedTarget trackedTarget : user.getTrackedTargets().values()){
+			for(TrackedTarget trackedTarget : userAsset.getTrackedTargets().values()){
 				if((tempList = tempAlertsMap.get(trackedTarget.getStockId())) != null){
 					for (TargetAlert alert : tempList) {
 						try {
 							System.out.printf("user：%s , running target alert：%s%n",userName,alert.getId());
 							resultAlert = examAlert(trackedTarget, alert);
-							user.getTargetAlerts().put(resultAlert.getId(), resultAlert);
+							userAsset.getTargetAlerts().put(resultAlert.getId(), resultAlert);
 							if(resultAlert.isOn() && resultAlert.isTriggered()){
 								//丟進mailservice
 							}

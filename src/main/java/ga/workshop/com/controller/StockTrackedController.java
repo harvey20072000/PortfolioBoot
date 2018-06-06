@@ -16,19 +16,23 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
-import ga.workshop.com.crud.FlowOfCRUD;
-import ga.workshop.com.util.PortfolioContext;
+import ga.workshop.com.crud.TrackedTargetCRUD;
+import ga.workshop.com.logic.AuthService;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Controller
 @RequestMapping("/track")
+@SuppressWarnings({"rawtypes","unchecked"})
 public class StockTrackedController {
 	
 	private Gson gson = new Gson();
 	
 	@Autowired
-	private FlowOfCRUD crud/* = new TargetCRUD()*/;
+	private TrackedTargetCRUD crud;
+	
+	@Autowired
+	private AuthService authService; // TODO 日後加上身份時效認證filter
 	
     @ResponseBody
 	@RequestMapping(value = "add", method={RequestMethod.POST, RequestMethod.GET})
@@ -37,9 +41,8 @@ public class StockTrackedController {
 		Map result = new HashMap();
 		result.put("stockId", stockId);
 		try {
-			setUser(userName);
 			result.put("status", "0000");
-			result.put("isOK", crud.process("tracked", "add", stockId));
+			result.put("isOK", crud.addTarget(userName, stockId));
 		} catch (Exception e) {
 			log.error("createTarget fail, exception => {}", e.toString());
 			result.put("status", "9999");
@@ -49,7 +52,7 @@ public class StockTrackedController {
     
     @ResponseBody
 	@RequestMapping(value = "get", method={RequestMethod.POST, RequestMethod.GET})
-    public String getTrackedTarget(@RequestParam String stockId){	
+    public String getTrackedTarget(@RequestParam String userName,@RequestParam String stockId){	
     	log.debug("getTrackedTarget[stockId:{}]",stockId);
 		Map result = new HashMap();
 		GsonBuilder gsonBuilder = new GsonBuilder();
@@ -58,7 +61,7 @@ public class StockTrackedController {
 		result.put("stockId", stockId);
 		try {
 			result.put("status", "0000");
-			result.put("target", crud.process("tracked", "get", stockId));
+			result.put("target", crud.getTarget(userName, stockId));
 		} catch (Exception e) {
 			log.error("getTrackedTarget fail, exception => {}", e.toString());
 			result.put("status", "9999");
@@ -68,12 +71,12 @@ public class StockTrackedController {
     
     @ResponseBody
 	@RequestMapping(value = "maxPages", method={RequestMethod.POST, RequestMethod.GET})
-    public String maxPages(){
+    public String maxPages(@RequestParam String userName){
 //    	log.debug("getTarget[proxyName:{}]",proxyName);
 		Map result = new HashMap();
 		try {
 			result.put("status", "0000");
-			result.put("targets", crud.process("tracked", "maxPages", null));
+			result.put("targets", crud.maxPages(userName));
 		} catch (Exception e) {
 			log.error("listSize fail, exception => {}", e.toString());
 			result.put("status", "9999");
@@ -94,9 +97,8 @@ public class StockTrackedController {
 //			for(Target target : crud.listAll(page)){
 //				wrappers.add(new TargetWrapper(target));
 //			}
-			setUser(userName);
 			result.put("status", "0000");
-			result.put("targets", crud.process("tracked", "list", page+""));
+			result.put("targets", crud.listAll(userName, page));
 		} catch (Exception e) {
 			log.error("listTargets fail, exception => {}", e.toString());
 			result.put("status", "9999");
@@ -125,9 +127,8 @@ public class StockTrackedController {
 			
 			log.debug("updateTarget[stockId:{}]",stockId);
 			result.put("stockId", stockId);
-			setUser(userName);
 			result.put("status", "0000");
-			result.put("isOK", crud.process("tracked", "update", restArgs));
+			result.put("isOK", crud.updateTarget(userName, stockId, restArgs));
 		} catch (Exception e) {
 			log.error("updateTarget fail, exception => {}", e.toString());
 			result.put("status", "9999");
@@ -142,9 +143,8 @@ public class StockTrackedController {
 		Map result = new HashMap();
 		result.put("stockId", stockId);
 		try {
-			setUser(userName);
 			result.put("status", "0000");
-			result.put("isOK", crud.process("tracked", "remove", stockId));
+			result.put("isOK", crud.removeTarget(userName, stockId));
 		} catch (Exception e) {
 			log.error("deleteTarget fail, exception => {}", e.toString());
 			result.put("status", "9999");
@@ -157,9 +157,8 @@ public class StockTrackedController {
     public String outputDatas(@RequestParam String userName) {
 		Map result = new HashMap();
 		try {
-			setUser(userName);
 			result.put("status", "0000");
-			result.put("isOK", crud.process("tracked", "output", null));
+			result.put("isOK", crud.outputDatas(userName));
 		} catch (Exception e) {
 			log.error("outputDatas fail, exception => {}", e.toString());
 			result.put("status", "9999");
@@ -167,8 +166,4 @@ public class StockTrackedController {
     	return gson.toJson(result);
 	}
     
-    private void setUser(String userName){
-    	PortfolioContext.userName = userName;
-    }
-
 }

@@ -1,9 +1,6 @@
 package ga.workshop.com.util;
 
-import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.log;
-
 import java.text.SimpleDateFormat;
-import java.util.Date;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -22,8 +19,12 @@ public class Const {
 	
 	public static String USERS_INPUT_FILE_PATH = FILE_ROOT_PATH + "/users to run.txt";
 	public static String USERS_OUTPUT_FILE_PATH = FILE_ROOT_PATH + "/users output datas.txt";
+	public static String USERS_ASSETS_FILE_PATH = FILE_ROOT_PATH + "/users assets datas.txt";
 	
 	public static SimpleDateFormat SDF_NO_TIME = new SimpleDateFormat("yyyy-MM-dd");
+	public static SimpleDateFormat SDF_TIMESTAMP = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+	
+	public static long SESSION_PASSOUT_INTERVAL = 1*24*60*60*1000;
 	
 	@Value("${data.storage.local}")
     public void setFileRootPath(String value) {
@@ -35,5 +36,6 @@ public class Const {
 		DATA_OUTPUT_FILE_PATH = DATA_OUTPUT_FILE_PATH.replace(tempRoot, value);
 		USERS_INPUT_FILE_PATH = USERS_INPUT_FILE_PATH.replace(tempRoot, value);
 		USERS_OUTPUT_FILE_PATH = USERS_OUTPUT_FILE_PATH.replace(tempRoot, value);
+		USERS_ASSETS_FILE_PATH = USERS_ASSETS_FILE_PATH.replace(tempRoot, value);
     }
 }

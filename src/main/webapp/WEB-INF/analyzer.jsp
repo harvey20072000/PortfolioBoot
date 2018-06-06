@@ -740,7 +740,7 @@
 			  <source src="<c:url value="/resources/audio/end.mp3" />" type="audio/mpeg">
 			</audio> -->
 			<div style="display:inline;">
-			<a href="./tracker.jsp" target="_blank">前往追蹤網頁</a>
+			<a href="./tracker" target="_blank">前往追蹤網頁</a>
 			<button class="pure-button pure-button-primary" id="addToTrackButton" onclick="addToTrack()">加入追蹤</button>
 			</div> <div id = "msg" style="margin-left: 20px;display:inline;"></div><p>
 			<button class="pure-button pure-button-primary" id="createButton" onclick="createTarget()">新　　增</button>

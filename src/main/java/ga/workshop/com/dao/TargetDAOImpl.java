@@ -23,10 +23,12 @@ import com.google.gson.reflect.TypeToken;
 
 import ga.workshop.com.model.Target;
 import ga.workshop.com.model.User;
+import ga.workshop.com.model.UserAssets;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Service
+@SuppressWarnings("rawtypes")
 public class TargetDAOImpl implements TargetDAO {
 
 	private JsonParser parser = new JsonParser();
@@ -63,7 +65,7 @@ public class TargetDAOImpl implements TargetDAO {
 			return map;
 		} catch (Exception e) {
 			log.error("inputData fail, exception => {}", e.toString());
-			e.printStackTrace();
+//			e.printStackTrace();
 			throw e;
 		}finally {
 			if(isr != null)
@@ -73,7 +75,7 @@ public class TargetDAOImpl implements TargetDAO {
 	}
 
 	@Override
-	public boolean outputData(String filePath , Map<String ,Target> map) throws Exception{
+	public boolean outputData(String filePath , Map map) throws Exception{
 		OutputStream os = null;
 		try {
 			File file = createFileIfNotExist(filePath);
@@ -94,7 +96,7 @@ public class TargetDAOImpl implements TargetDAO {
 			return true;
 		} catch (Exception ex) {
 			log.error("outputData fail, exception => {}", ex.toString());
-			ex.printStackTrace();
+//			ex.printStackTrace();
 			throw ex;
 		}finally {
 			if(os != null)
@@ -123,7 +125,7 @@ public class TargetDAOImpl implements TargetDAO {
 			return true;
 		} catch (Exception ex) {
 			log.error("outputLine fail, exception => {}", ex.toString());
-			ex.printStackTrace();
+//			ex.printStackTrace();
 			throw ex;
 		}finally {
 			if(os != null)
@@ -162,19 +164,21 @@ public class TargetDAOImpl implements TargetDAO {
 					}
 					continue;
 				}
-				if(array[0].trim().matches("[a-z,A-Z,0-9]+") && array[1].trim().matches("[a-z,A-Z,0-9]+")){
+				if (array[0].trim().matches("[a-z,A-Z,0-9]+") && array[1].trim().matches("[a-z,A-Z,0-9]+")){
 					name = array[0].trim();
 					password = array[1].trim();
 					map.put(name, new User(name,password));
 				}
-				System.out.println("why");
+//				if ((name = array[0].trim()).matches("[a-z,A-Z,0-9]+") && (password = array[1].trim()).matches("[a-z,A-Z,0-9]+")){
+//					map.put(name, new User(name,password));
+//				}
 			}
 			
 			br.close();
 			return map;
 		} catch (Exception e) {
 			log.error("inputUsers fail, exception => {}", e.toString());
-			e.printStackTrace();
+//			e.printStackTrace();
 			throw e;
 		}finally {
 			if(isr != null)
@@ -208,7 +212,7 @@ public class TargetDAOImpl implements TargetDAO {
 			return map;
 		} catch (Exception e) {
 			log.error("inputUsersWithDatas fail, exception => {}", e.toString());
-			e.printStackTrace();
+//			e.printStackTrace();
 			throw e;
 		}finally {
 			if(isr != null)
@@ -216,33 +220,67 @@ public class TargetDAOImpl implements TargetDAO {
 		}
 	}
 
+//	@Override
+//	public boolean outputUsers(String filePath, Map<String, User> map) throws Exception {
+//		OutputStream os = null;
+//		try {
+//			File file = createFileIfNotExist(filePath);
+//			
+//			System.out.println("outputUsers : " + file.getAbsolutePath());
+//			// create a new OutputStreamWriter
+//			os = new FileOutputStream(filePath);
+//			OutputStreamWriter writer = new OutputStreamWriter(os,charset);
+//			gsonBuilder.serializeSpecialFloatingPointValues();
+//			Gson bGson = gsonBuilder.create();
+//			String outputString = bGson.toJson(new LinkedList<>(map.values()));
+//			
+//			// write something in the file
+//			writer.write(outputString);
+//
+//			// flush the stream
+//			writer.flush();
+//			return true;
+//		} catch (Exception ex) {
+//			log.error("outputUsers fail, exception => {}", ex.toString());
+//			ex.printStackTrace();
+//			throw ex;
+//		}finally {
+//			if(os != null)
+//				os.close();
+//		}
+//	}
+	
 	@Override
-	public boolean outputUsers(String filePath, Map<String, User> map) throws Exception {
-		OutputStream os = null;
+	public Map<String, UserAssets> inputUsersAssets(String filePath, Map<String, UserAssets> map) throws Exception {
+		InputStreamReader isr = null;
 		try {
 			File file = createFileIfNotExist(filePath);
 			
-			System.out.println("outputUsers : " + file.getAbsolutePath());
-			// create a new OutputStreamWriter
-			os = new FileOutputStream(filePath);
-			OutputStreamWriter writer = new OutputStreamWriter(os,charset);
-			gsonBuilder.serializeSpecialFloatingPointValues();
-			Gson bGson = gsonBuilder.create();
-			String outputString = bGson.toJson(new LinkedList<>(map.values()));
+			System.out.println("inputUsersAssets : " + file.getAbsolutePath());
+			String line = null;
+			isr = new InputStreamReader(new FileInputStream(file), charset);
+			BufferedReader br = new BufferedReader(isr);
+			StringBuilder sb = new StringBuilder("");
+			while ((line = br.readLine()) != null) {
+				sb.append(line);
+			}
 			
-			// write something in the file
-			writer.write(outputString);
-
-			// flush the stream
-			writer.flush();
-			return true;
-		} catch (Exception ex) {
-			log.error("outputUsers fail, exception => {}", ex.toString());
-			ex.printStackTrace();
-			throw ex;
+			Type listType = new TypeToken<ArrayList<UserAssets>>() {
+			}.getType();
+			ArrayList<UserAssets> jsonArr = gson.fromJson(sb.toString(), listType);
+			for (UserAssets asset : jsonArr) {
+				map.put(asset.getName(), asset);
+			}
+			
+			br.close();
+			return map;
+		} catch (Exception e) {
+			log.error("inputUsersAssets fail, exception => {}", e.toString());
+//			e.printStackTrace();
+			throw e;
 		}finally {
-			if(os != null)
-				os.close();
+			if(isr != null)
+				isr.close();
 		}
 	}
 	
@@ -273,5 +311,6 @@ public class TargetDAOImpl implements TargetDAO {
 			System.out.println("not match");
 		}
 	}
+
 
 }

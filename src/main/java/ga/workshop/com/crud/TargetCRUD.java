@@ -1,8 +1,7 @@
 package ga.workshop.com.crud;
 
-import java.io.FileInputStream;
-import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -11,21 +10,21 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 import javax.annotation.PostConstruct;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import ga.workshop.com.dao.TargetDAO;
 import ga.workshop.com.logic.DataProcesser;
+import ga.workshop.com.model.ActionBean;
+import ga.workshop.com.model.ActionBean.ACTION_PROP;
+import ga.workshop.com.model.ActionBean.ACTION_TYPE;
 import ga.workshop.com.model.Target;
 import ga.workshop.com.util.Const;
-import ga.workshop.com.util.DataStorageSettings;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -55,29 +54,21 @@ public class TargetCRUD {
 	@Autowired
 	private DataProcesser dataProcesser;
 	
-	private Map<String ,Target> rawDataInputMap = new ConcurrentHashMap<>();
+	private Map<String ,Target> rawDataInputMap = new ConcurrentHashMap<>(); 
 	private Map<String ,Target> cacheMap = new ConcurrentHashMap<>();
-	private volatile int cacheDataUpdatedCounts;	// 要和dataUpdatedCounts做比對，有不一樣就自動儲存
-	private volatile int dataUpdatedCounts;
-	private volatile int cacheDataUpdatedCountsForThreads;
+	private boolean isActionPerformed = false;	// 純粹用作同步資料時的狀況描述
 	
 	private List<Target> retList = new ArrayList<>();
 	private int maxDataSend = 10;
 	
 	private volatile String dataProcessedStatus;
 	
-	private ScheduledThreadPoolExecutor stpe = new ScheduledThreadPoolExecutor(10);
-	private static ScheduledFuture f;
+	private ScheduledThreadPoolExecutor stpe = new ScheduledThreadPoolExecutor(5);
 	
-	private Long mapUpdateTime;
-//	private Map<String, Long> cacheUpdateTime = new HashMap<>();
-	private long cacheInterval = 5*60*1000;
+	private final long CACHE_INTERVAL = 7*24*60*60*1000; // 7天
+	private List<ActionBean> actionList = new LinkedList<>();
 	
-	private Map<String, Checker> runningThreads = new ConcurrentHashMap<>();
-	
-	public TargetCRUD(){
-		
-	}
+	public TargetCRUD(){}
 	
 	@PostConstruct
 	private void init() {
@@ -91,26 +82,13 @@ public class TargetCRUD {
 				initCache();
 			}
 		}.start();
-	}
-	
-	private void initProp(){
-		if(null == propFileName || "".equals(propFileName))
-    		propFileName = "kill_giant_game_story";
-    	String propFilePath = "{ROOT_PATH}/story/{PROP_FILE_NAME}.properties";
-    	try {
-    		properties = new Properties();
-			properties.load(new InputStreamReader(new FileInputStream(propFilePath.replace("{ROOT_PATH}", Const.ROOT_PATH)
-					.replace("{PROP_FILE_NAME}", propFileName)), "utf-8"));
-		} catch (Exception e) {
-			log.error("fail to load property file : {} , exception => {}",propFileName,e.toString());
-		}
+		stpe.scheduleWithFixedDelay(new Checker(), 1, 1, TimeUnit.MINUTES);
+		stpe.execute(new ActionWorker());
 	}
 	
 	private void initCache() {
 		try {
 			Map<String,Target> tempMap = new HashMap<>();
-			log.debug("initCache inputData from path({}) , time = {}",Const.DATA_INPUT_FILE_PATH,System.currentTimeMillis());
-//			log.debug("initCache inputData from DataStorageSetting({}) , time = {}",DataStorageSettings.fileRootPath,System.currentTimeMillis());
 			tempMap = targetDAO.inputData(Const.DATA_INPUT_FILE_PATH, tempMap);
 			if(rawDataInputMap.isEmpty() 
 					|| rawDataInputMap.size() != tempMap.size() 
@@ -120,7 +98,6 @@ public class TargetCRUD {
 				for(String key : rawDataInputMap.keySet()){
 					cacheMap.putIfAbsent(key, rawDataInputMap.get(key));
 				}
-				runningThreads.clear();
 			}
 		} catch (Exception e) {
 			log.error("initCache fail, exception => {}",e.toString());
@@ -134,11 +111,8 @@ public class TargetCRUD {
 		initCache();
 		log.info("outputDatas => checking is-input-file-changed");
 		String returnString;
-		if(cacheDataUpdatedCounts == dataUpdatedCounts)
+		if(!isActionPerformed) {
 			returnString = "unchange";
-		if(cacheDataUpdatedCounts < dataUpdatedCounts){
-			log.error("outputDatas fail, logic error");
-			returnString = "logic error";
 		}
 		try {
 			targetDAO.outputData(Const.DATA_OUTPUT_FILE_PATH.replace("{DATE}", Const.SDF_NO_TIME.format(new Date())), cacheMap);
@@ -147,7 +121,7 @@ public class TargetCRUD {
 			log.error("outputDatas fail, exception => {}",e.toString());
 			returnString = "false";
 		}
-		dataUpdatedCounts = cacheDataUpdatedCounts;
+		isActionPerformed = false;
 		return returnString;
 	}
 	
@@ -178,8 +152,7 @@ public class TargetCRUD {
 	public String createTarget(String stockId){
 		if (!isValidInput(stockId))
 			return "false";
-		cacheMap.put(stockId, new Target(stockId));
-		cacheDataUpdatedCounts++;
+		actionList.add(new ActionBean(ACTION_TYPE.CREATE).addProp(ACTION_PROP.target.toString(), new Target(stockId)));
 		log.debug("Target( {} ) created in cache!!", stockId);
 		return "true";
 	}
@@ -240,14 +213,13 @@ public class TargetCRUD {
 	}
 	
 	/*
-	 * 
+	 * 暫時用不到
 	 */
 	public String updateTarget(String stockId) {
 		if(!checkCache(stockId) || !isValidInput(stockId))
 			return "false";
-		Target target = cacheMap.get(stockId);
-		cacheMap.put(target.getStockId(), target);
-		cacheDataUpdatedCounts++;
+//		Target target = cacheMap.get(stockId);
+//		cacheMap.put(target.getStockId(), target);
 		return "true";
 	}
 	
@@ -257,88 +229,54 @@ public class TargetCRUD {
 	public String deleteTarget(String stockId) {
 		if (!checkCache(stockId))
 			return "false";
-		cacheMap.remove(stockId);
-		cacheDataUpdatedCounts++;
+		actionList.add(new ActionBean(ACTION_TYPE.DELETE).addProp(ACTION_PROP.target.toString(), new Target(stockId)));
 		return "true";
 	}
 	
-	// 執行檢測url狀態
-	@Scheduled(cron = "*/30 * * * * *")
-	public void doCheck(){
-		Checker checker;
-		Target target;
-		String threadKey = "checker";
-		System.out.println("analyzer doCheck executed!");
-		if (cacheDataUpdatedCounts == 0 && cacheDataUpdatedCountsForThreads == 0 && cacheMap.size() > 0
-				&& runningThreads.size() == 0) {
-			checker = new Checker();
-			runningThreads.put(threadKey, checker);
-			runCheck(checker);
-			System.out.println("analyzer doCheck -> thread init executed!");
-		}
-		if(cacheDataUpdatedCounts > cacheDataUpdatedCountsForThreads){
-			if(runningThreads.size() < cacheMap.size()){	// create
-				checker = new Checker();
-				runningThreads.put(threadKey, checker);
-				runCheck(checker);
-				System.out.println("analyzer doCheck -> create executed!");
-			}else if(runningThreads.size() == cacheMap.size()){	// update
-				checker = new Checker();
-				runningThreads.put(threadKey, checker);
-				runCheck(checker);
-				System.out.println("analyzer doCheck -> update executed!");
-			}else if (runningThreads.size() > cacheMap.size()) {	// delete
-				checker = new Checker();
-				runningThreads.put(threadKey, checker);
-				runCheck(checker);
-				System.out.println("analyzer doCheck -> delete executed!");
-			}
-			cacheDataUpdatedCountsForThreads = cacheDataUpdatedCounts;
-		}
-		System.out.println("cacheMap count : "+cacheMap.size());
-		System.out.println("runningThreads count : "+runningThreads.size());
-		System.out.println("ThreadPool active counts : "+stpe.getActiveCount());
-		System.out.println("ThreadPool size : "+stpe.getPoolSize());
-	}
-	
-	private void runCheck(Checker checker){
-		if (!stpe.isShutdown()) {
-			stpe.shutdown();
-			stpe = new ScheduledThreadPoolExecutor(10);
-		}
-		stpe.execute(checker);
-	}
-	
+	/**
+	 * 從網路上抓取股票資料，並且送進分析處理
+	 * @author harvey20072000
+	 *
+	 */
 	private class Checker extends Thread{
 		@Override
 		public void run(){
-			System.out.println("Checker running~~~~~~~~");
+			System.out.println("TargetCRUD Checker running~~~~~~~~");
 			String response,url;
-			Date date;
-			int dataProcessedNum = 0;
-			for (Target target : cacheMap.values()) {
+			Calendar calendar = Calendar.getInstance();
+			int dataProcessedNum = 0,totalTargetSize = cacheMap.size();
+			Map<String,Target> tempTargetMap = new HashMap<>(cacheMap);
+			List<String> toBeDeleteList = new LinkedList<>();
+			for (Target target : tempTargetMap.values()) {
 				try {
 					// https://statementdog.com/api/v1/fundamentals/{STOCK_ID}/2012/1/{YEAR}/4/?queried_by_user=false&_={TIME_STAMP}
-					if(target.getMarket() != null && target.getLatestClosingPriceAndDate() != null)	// 以這兩個屬性有無值來判斷是否已經跑過url
+					// 以這兩個屬性有無值和更新時間是否超過interval來判斷是否已經跑過url
+					if(target.getMarket() != null && 
+							target.getLatestClosingPriceAndDate() != null && 
+							target.getUpdateTime().getTime() + CACHE_INTERVAL > new Date().getTime()) {
+						totalTargetSize--;
 						continue;
-					date = new Date();
-					url = DATA_URL.replace("{STOCK_ID}",
-							target.getStockId()).replace("{YEAR}", (date.getYear() + 1900) + "").replace("{TIME_STAMP}",
-									date.getTime() + "");
-					System.out.println("url："+url);
+					}
+					url = DATA_URL.replace("{STOCK_ID}",target.getStockId())
+							.replace("{YEAR}", calendar.get(Calendar.YEAR)+"").replace("{TIME_STAMP}",calendar.getTimeInMillis() + "");
+					System.out.println("Checker run url："+url);
 					response = WebUtil.sendGet(url);
-					if((target = dataProcesser.processData(target, response)) != null){
-						cacheMap.put(target.getStockId(), target);
+					if(dataProcesser.processData(target, response)){
+						tempTargetMap.put(target.getStockId(),target);
 						dataProcessedNum++;
 					}
 				} catch (Exception e) {
 					log.error("target : {} , Checker fail to execute , exception => {}",target.getStockId(),e.toString());
-					cacheMap.remove(target.getStockId());
-					continue;
+					toBeDeleteList.add(target.getStockId());
 				}
 			}
+			for(String id : toBeDeleteList) {
+				tempTargetMap.remove(id);
+				cacheMap.remove(id);
+			}
+			cacheMap.putAll(tempTargetMap);
 			fixDataInput();
-			dataProcessedStatus = dataProcessedNum+"/"+cacheMap.size()+" 分析完成 !";
+			dataProcessedStatus = dataProcessedNum+"/"+totalTargetSize+" 分析完成 !";
 			System.out.println("analyzer："+dataProcessedStatus);
 		}
 	}
@@ -355,6 +293,37 @@ public class TargetCRUD {
 		}
 	}
 	
+	private class ActionWorker extends Thread{
+		@Override
+		public void run() {
+			ActionBean actionBean = null;
+			Target target = null;
+			while(true) {
+				if(actionList.isEmpty())
+					continue;
+				actionBean = actionList.remove(0);
+				try {
+					if(ACTION_TYPE.CREATE.equals(actionBean.getActionType()) &&
+							actionBean.getProp(ACTION_PROP.target.toString()) != null) {
+						target = (Target)actionBean.getProp(ACTION_PROP.target.toString());
+						cacheMap.put(target.getStockId(), target);
+					}else if (ACTION_TYPE.UPDATE.equals(actionBean.getActionType())) {
+						// TODO 暫時用不到
+					}else if (ACTION_TYPE.DELETE.equals(actionBean.getActionType()) &&
+							actionBean.getProp(ACTION_PROP.target.toString()) != null) {
+						target = (Target)actionBean.getProp(ACTION_PROP.target.toString());
+						cacheMap.remove(target.getStockId());
+					}
+					isActionPerformed = true;
+				} catch (Exception e) {
+					log.error("ActionWorker for action({},{}) fail, exception => {}",
+							actionBean.getActionType().toString(),
+							Const.SDF_TIMESTAMP.format(new Date(actionBean.getCreatTime())),
+							e.toString());
+				}
+			}
+		}
+	}
 	public static void main(String[] args) throws Exception {
 		TargetCRUD crud = new TargetCRUD();
 		
