@@ -302,6 +302,7 @@ public class TargetCRUD {
 				if(actionList.isEmpty())
 					continue;
 				actionBean = actionList.remove(0);
+				log.debug("action({}) processing",actionBean.getActionType().toString());
 				try {
 					if(ACTION_TYPE.CREATE.equals(actionBean.getActionType()) &&
 							actionBean.getProp(ACTION_PROP.target.toString()) != null) {

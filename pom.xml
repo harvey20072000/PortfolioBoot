@@ -21,10 +21,7 @@
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-		<azure.version>2.0.1</azure.version>
 		<java.version>1.8</java.version>
-		<spring-boot-admin.version>2.0.0</spring-boot-admin.version>
-		<spring-cloud.version>Finchley.BUILD-SNAPSHOT</spring-cloud.version>
 	</properties>
 
 	<dependencies>
@@ -88,9 +85,17 @@
 			<artifactId>spring-cloud-starter-aws-messaging</artifactId>
 		</dependency>
 		 -->
+		 <!-- https://mvnrepository.com/artifact/javax.servlet/javax.servlet-api -->
+		<dependency>
+		    <groupId>javax.servlet</groupId>
+		    <artifactId>javax.servlet-api</artifactId>
+		    <version>3.1.0</version>
+		</dependency>
+		 
 		<dependency>
 		    <groupId>javax.servlet</groupId>
 		    <artifactId>jstl</artifactId>
+		    <scope>provided</scope>
 		</dependency>
 		<dependency>
 		    <groupId>org.apache.tomcat.embed</groupId>
@@ -203,6 +208,12 @@
 		    <groupId>com.google.api-client</groupId>
 		    <artifactId>google-api-client-appengine</artifactId>
 		    <version>1.22.0</version>
+		    <exclusions>
+		    	<exclusion>
+		    		<groupId>javax.servlet</groupId>
+		    		<artifactId>servlet-api</artifactId>
+		    	</exclusion>
+		    </exclusions>
 		</dependency>
 		<!-- https://mvnrepository.com/artifact/com.google.api-client/google-api-client-java6 -->
 		<dependency>
@@ -211,11 +222,11 @@
 		    <version>1.22.0</version>
 		</dependency>
 		<!-- https://mvnrepository.com/artifact/com.google.oauth-client/google-oauth-client-jetty -->
-		<dependency>
+		<!-- <dependency>
 		    <groupId>com.google.oauth-client</groupId>
 		    <artifactId>google-oauth-client-jetty</artifactId>
 		    <version>1.22.0</version>
-		</dependency>
+		</dependency> -->
 		
 		<dependency>
 			<groupId>com.google.code.gson</groupId>
@@ -240,9 +251,20 @@
 			        <includeSystemScope>true</includeSystemScope>
 			    </configuration>
 			</plugin>
+			<plugin>
+				<artifactId>maven-war-plugin</artifactId>
+				<configuration>
+					<failOnMissingWebXml>false</failOnMissingWebXml>
+					<packagingExcludes>
+						src/main/resources/*.dll,
+						src/main/resources/*.p12,
+					</packagingExcludes>
+				</configuration>
+			</plugin>
 		</plugins>
 	</build>
 
+<!-- 
 	<repositories>
 		<repository>
 			<id>spring-snapshots</id>
@@ -261,6 +283,6 @@
 			</snapshots>
 		</repository>
 	</repositories>
-
+ -->
 
 </project>
